@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campus Navigator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Verdana, sans-serif;
+        }
+        
+        #map {
+            height: 70vh;
+            width: 100%;
+        }
+        
+        .header {
+            background-color: #001844;
+            color: white;
+            padding: 10px 15px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+        
+        .controls {
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .destination-btn {
+            margin: 5px;
+            padding: 8px 12px;
+            background-color: #E31B22;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .destination-btn:hover {
+            background-color: #E31B22;
+        }
+        
+        .location-btn {
+            padding: 8px 12px;
+            background-color: #001844;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 10px;
+        }
+        
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-top: 1px solid #ddd;
+            min-height: 50px;
+        }
+
+        .destination-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>The Scots College</h1>
+    </div>
+    
+    <div class="controls">
+        <button id="locate-me" class="location-btn">Find My Location</button>
+        <button id="manual-location" class="location-btn" style="background-color: #FF9800; margin-left: 10px;">Set Location Manually</button>
+        <div class="destination-container" id="destinations">
+            <!-- Destination buttons will be added here dynamically -->
+        </div>
+    </div>
+    
+    <div id="map"></div>
+    
+    <div id="manual-mode-info" class="manual-mode-info">
+        <strong>Manual Location Mode</strong>
+        <p>Click anywhere on the map to set your location.</p>
+        <button id="exit-manual-mode" class="location-btn" style="background-color: #F44336;">Exit Manual Mode</button>
+    </div>
+    
+    <div class="status" id="status">Welcome to Campus Navigator! Click "Find My Location" to start.</div>
+    
+    <script>
+        // Initialize the map - center on Sydney campus
+        const map = L.map('map').setView([-33.87475129615283, 151.25336555904883], 17); // Default view of campus center
+        
+        // Add OpenStreetMap tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        
+        // Variables to hold current user position and markers
+        let userMarker = null;
+        let destinationMarker = null;
+        let routeLine = null;
+        let manualMode = false;
+        const statusDiv = document.getElementById('status');
+        const locateBtn = document.getElementById('locate-me');
+        const manualLocateBtn = document.getElementById('manual-location');
+        const exitManualModeBtn = document.getElementById('exit-manual-mode');
+        const manualModeInfo = document.getElementById('manual-mode-info');
+        const destinationsDiv = document.getElementById('destinations');
+        
+        // Actual campus locations
+        const campusLocations = [
+            { name: "Main Building", lat: -33.87535618730922, lng: 151.25322376538097 },
+            { name: "Student Center", lat: -33.87475129615283, lng: 151.25336555904883 },
+            { name: "Anderson Hall & Chapel", lat: -33.873920308022164, lng: 151.25311610557637 },
+            { name: "Science Building", lat: -33.87395687260068, lng: 151.25345436706704 },
+            { name: "Centenary Center", lat: -33.873553095110786, lng: 151.25301971061413 },
+            { name: "Ginahgulla", lat: -33.87567396327689, lng: 151.25274186648906 },
+            { name: "Dining Hall", lat: -33.87476081015653, lng: 151.25314210658726 },
+            { name: "Gym", lat: -33.87401871421999, lng: 151.25383251737279 },
+            { name: "Business Building", lat: -33.87581754955968, lng: 151.25362926656805 },
+            { name: "Macintyre House", lat: -33.876443677078555, lng: 151.25419062502445 }, 
+            { name: "Macintyre Tennis Courts", lat: -33.87614002934422, lng: 151.25411974643146 },
+            { name: "Aspinall House", lat: -33.874392141507414, lng: 151.25311345883685 },
+            { name: "Fairfax House", lat: -33.875690440403424, lng: 151.25144904095313 },
+            { name: "Kirkland House", lat: -33.87378378032329, lng: 151.2540913949639 },
+            { name: "Royle House", lat: -33.875909350497885, lng: 151.25466976433424 }
+        ];
+        
+        // Initialize campus with Sydney campus center
+        let campusCenter = { lat: -33.87475129615283, lng: 151.25336555904883 };
+        
+        // Function to locate the user
+        function locateUser() {
+            statusDiv.innerHTML = "Locating you...";
+            
+            // Exit manual mode if active
+            exitManualMode();
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const userLat = position.coords.latitude;
+                        const userLng = position.coords.longitude;
+                        
+                        // Update user marker
+                        if (userMarker) {
+                            userMarker.setLatLng([userLat, userLng]);
+                        } else {
+                            userMarker = L.marker([userLat, userLng], {
+                                icon: L.divIcon({
+                                    className: 'user-marker',
+                                    html: '<div style="background-color: blue; border-radius: 50%; width: 12px; height: 12px; border: 2px solid white;"></div>',
+                                    iconSize: [16, 16],
+                                    iconAnchor: [8, 8]
+                                })
+                            }).addTo(map);
+                        }
+                        
+                        // Center map on user
+                        map.setView([userLat, userLng], 17);
+                        
+                        statusDiv.innerHTML = "You are located! Choose a destination from the list or explore the map.";
+                    },
+                    (error) => {
+                        console.error("Error getting location:", error);
+                        switch(error.code) {
+                            case error.PERMISSION_DENIED:
+                                statusDiv.innerHTML = "Location access denied. Please enable location permissions in your browser settings or use 'Set Location Manually' option.";
+                                break;
+                            case error.POSITION_UNAVAILABLE:
+                                statusDiv.innerHTML = "Location information unavailable. Try again later or use 'Set Location Manually' option.";
+                                break;
+                            case error.TIMEOUT:
+                                statusDiv.innerHTML = "Location request timed out. Try again or use 'Set Location Manually' option.";
+                                break;
+                            default:
+                                statusDiv.innerHTML = "An unknown error occurred while getting your location. Try using 'Set Location Manually' option.";
+                        }
+                    }
+                );
+            } else {
+                statusDiv.innerHTML = "Geolocation is not supported by your browser. Please use the 'Set Location Manually' option.";
+            }
+        }
+        
+        // Function to enable manual location setting
+        function enableManualMode() {
+            manualMode = true;
+            manualModeInfo.style.display = "block";
+            statusDiv.innerHTML = "Manual location mode is active. Click anywhere on the map to set your location.";
+        }
+        
+        // Function to exit manual location setting
+        function exitManualMode() {
+            manualMode = false;
+            manualModeInfo.style.display = "none";
+        }
+        
+        // Function to set user location manually
+        function setManualLocation(e) {
+            if (!manualMode) return;
+            
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            
+            // Update user marker
+            if (userMarker) {
+                userMarker.setLatLng([lat, lng]);
+            } else {
+                userMarker = L.marker([lat, lng], {
+                    icon: L.divIcon({
+                        className: 'user-marker',
+                        html: '<div style="background-color: blue; border-radius: 50%; width: 12px; height: 12px; border: 2px solid white;"></div>',
+                        iconSize: [16, 16],
+                        iconAnchor: [8, 8]
+                    })
+                }).addTo(map);
+            }
+            
+            statusDiv.innerHTML = `Location manually set to: ${lat.toFixed(6)}, ${lng.toFixed(6)}. Choose a destination from the list.`;
+            exitManualMode();
+        }
+        
+        // Function to set up campus locations
+        function setupCampusLocations() {
+            // Add location markers to the map
+            campusLocations.forEach(location => {
+                L.marker([location.lat, location.lng])
+                    .addTo(map)
+                    .bindPopup(location.name);
+            });
+            
+            // Create destination buttons
+            campusLocations.forEach(location => {
+                const btn = document.createElement('button');
+                btn.className = 'destination-btn';
+                btn.textContent = location.name;
+                btn.onclick = () => navigateTo(location);
+                destinationsDiv.appendChild(btn);
+            });
+        }
+        
+        // Function to navigate to a destination
+        function navigateTo(destination) {
+            // Clear previous route
+            if (routeLine) {
+                map.removeLayer(routeLine);
+            }
+            
+            if (destinationMarker) {
+                map.removeLayer(destinationMarker);
+            }
+            
+            // Get current user location
+            if (!userMarker) {
+                statusDiv.innerHTML = "Please locate yourself first!";
+                return;
+            }
+            
+            const userLatLng = userMarker.getLatLng();
+            
+            // Add destination marker
+            destinationMarker = L.marker([destination.lat, destination.lng], {
+                icon: L.divIcon({
+                    className: 'destination-marker',
+                    html: '<div style="background-color: green; border-radius: 50%; width: 12px; height: 12px; border: 2px solid white;"></div>',
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8]
+                })
+            }).addTo(map);
+            
+            // Draw a line from user to destination (simplified route)
+            routeLine = L.polyline([
+                [userLatLng.lat, userLatLng.lng],
+                [destination.lat, destination.lng]
+            ], {
+                color: 'blue',
+                weight: 4,
+                opacity: 0.7,
+                dashArray: '10, 10'
+            }).addTo(map);
+            
+            // Fit the map to show both user and destination
+            const bounds = L.latLngBounds([userLatLng, [destination.lat, destination.lng]]);
+            map.fitBounds(bounds, { padding: [50, 50] });
+            
+            // Calculate distance
+            const distance = calculateDistance(
+                userLatLng.lat, userLatLng.lng,
+                destination.lat, destination.lng
+            );
+            
+            // Update status
+            statusDiv.innerHTML = `Navigating to ${destination.name}. Distance: ${distance.toFixed(2)} meters. Follow the blue line.`;
+        }
+        
+        // Calculate distance between two points using the Haversine formula
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // Radius of the Earth in meters
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            
+            const a = 
+                Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+                
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const distance = R * c;
+            
+            return distance;
+        }
+        
+        // Add event listeners
+        locateBtn.addEventListener('click', locateUser);
+        manualLocateBtn.addEventListener('click', enableManualMode);
+        exitManualModeBtn.addEventListener('click', exitManualMode);
+        map.addEventListener('click', setManualLocation);
+        
+        // Set up the campus locations
+        setupCampusLocations();
+        
+        // Initial attempt to locate the user
+        setTimeout(locateUser, 1000);
+    </script>
+</body>
+</html>
